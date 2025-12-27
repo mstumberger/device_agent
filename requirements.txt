@@ -1,2 +1,3 @@
 # Core dependencies
 aiomqtt==2.4.0
+pyyaml

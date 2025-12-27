@@ -1,52 +1,60 @@
+"""MQTT client wrapper with LWT and connection retry support."""
+
 import asyncio
 import json
-from typing import Optional, Callable, Dict, Any, TYPE_CHECKING
+from typing import Optional
 
-from aiomqtt import Client, Will
+from aiomqtt import Client, Will, MqttError
 
 from cybergrid.helpers.logging import Logger
-
-if TYPE_CHECKING:
-    from cybergrid.config import Config
+from cybergrid.config import ConfigManager
 
 
 class MQTTClientWrapper(Logger):
+    """MQTT client wrapper with automatic reconnection and LWT."""
 
-    def __init__(
-        self,
-        config: "Config"
-    ):
+    def __init__(self, config: ConfigManager) -> None:
+        """Initialize MQTT client wrapper."""
         super().__init__()
         self.config = config
-
-        # MQTT client instance (None until we connect)
         self._client: Optional[Client] = None
-
-        # Connection state tracking
         self._connected = False
-        self._should_reconnect = True  # Set to False to stop reconnection loop
+        self._reconnect_requested = False
+        self._running = False
 
-        # Subscription registry: topic -> callback function
-        # We store these to re-subscribe after reconnection
-        self._subscriptions: Dict[str, Callable[[str], None]] = {}
+    async def start(self) -> None:
+        """Start connection management (runs in background task)."""
+        self._running = True
+        while self._running:
+            if not self._connected:
+                await self._connect_with_retry()
+            self._reconnect_requested = False
+            await asyncio.sleep(1)
 
-        # Background task that listens for incoming messages
-        self._subscription_task: Optional[asyncio.Task] = None
+    async def _connect_with_retry(self) -> bool:
+        """Connect with exponential backoff retry."""
+        retry_count = 0
+        backoff = 5
 
-    async def connect(self) -> None:
-        """Connect to MQTT broker with LWT configured."""
+        while not self._connected and not self._reconnect_requested and self._running:
+            try:
+                await self._connect()
+                return True
+            except (OSError, MqttError) as e:
+                retry_count += 1
+                self.warning(f"Connection failed (attempt {retry_count}), retrying in {backoff}s: {e}")
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 60)
+        return False
+
+    async def _connect(self) -> None:
+        """Connect to MQTT broker with LWT."""
         mqtt = self.config.mqtt
         device_id = self.config.device.id
 
-        self.info(f"Connecting to MQTT broker at {mqtt.host}:{mqtt.port}")
-
-        lwt_topic = f"device/{device_id}/status"
-        lwt_payload = json.dumps({"status": "offline"})
-
-        # Create Last Will Testament
         will = Will(
-            topic=lwt_topic,
-            payload=lwt_payload,
+            topic=f"device/{device_id}/status",
+            payload=json.dumps({"status": "offline"}),
             qos=1,
             retain=True
         )
@@ -54,55 +62,59 @@ class MQTTClientWrapper(Logger):
         self._client = Client(
             hostname=mqtt.host,
             port=mqtt.port,
-            identifier=mqtt.client_id,
+            identifier=device_id,
             will=will
         )
 
-        try:
-            await self._client.__aenter__()
-            self._connected = True
-            self.info("Connected to MQTT broker")
-
-            # Publish online status
-            await self.publish_status("online")
-        except Exception as e:
-            self.error(f"Failed to connect to MQTT broker: {e}", exc_info=True)
-            raise
+        await self._client.__aenter__()
+        self._connected = True
+        self.info(f"Connected to MQTT broker at {mqtt.host}:{mqtt.port}")
+        await self.publish_status("online")
 
     async def disconnect(self) -> None:
         """Disconnect from MQTT broker."""
-        self._should_reconnect = False
+        self._running = False
+        self._connected = False
 
-        if self._client and self._connected:
-            # Publish offline status before disconnecting
-            await self.publish_status("offline")
+        if self._client:
+            try:
+                await self.publish_status("offline")
+            except Exception:
+                pass
+            try:
+                await self._client.__aexit__(None, None, None)
+            except Exception:
+                pass
 
-            self.info("Disconnecting from MQTT broker")
-            await self._client.__aexit__(None, None, None)
-            self._connected = False
-            self.info("Disconnected from MQTT broker")
+    async def reconnect(self) -> None:
+        """Trigger reconnection (for config changes)."""
+        if self._client:
+            try:
+                await self.publish_status("offline")
+            except Exception:
+                pass
+            try:
+                await self._client.__aexit__(None, None, None)
+            except Exception:
+                pass
+
+        self._connected = False
+        self._reconnect_requested = True
 
     async def publish_status(self, status: str) -> None:
-        """Publish device status to the status topic."""
-        device_id = self.config.device.id
-        topic = f"device/{device_id}/status"
-        payload = json.dumps({"status": status})
-        await self.publish(topic, payload, qos=1, retain=True)
+        """Publish device status."""
+        topic = f"device/{self.config.device.id}/status"
+        await self.publish(topic, json.dumps({"status": status}), qos=1, retain=True)
 
     async def publish(self, topic: str, payload: str, qos: int = 0, retain: bool = False) -> None:
-        """Publish a message to a topic."""
-        if not self._connected:
-            self.warning(f"Not connected, cannot publish to {topic}")
+        """Publish a message."""
+        if not self._connected or not self._client:
             return
 
-        try:
-            await self._client.publish(topic, payload, qos=qos, retain=retain)
-            self.debug(f"Published to {topic}: {payload}")
-        except Exception as e:
-            self.error(f"Failed to publish to {topic}: {e}", exc_info=True)
+        self.debug(f"Publishing: {topic} | QoS={qos} | retain={retain} | payload={payload}")
+        await self._client.publish(topic, payload, qos=qos, retain=retain)
 
     @property
     def connected(self) -> bool:
-        """Check if currently connected to the broker."""
+        """Check if connected to broker."""
         return self._connected
-

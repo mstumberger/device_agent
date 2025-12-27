@@ -1,0 +1,7 @@
+mqtt:
+  host: localhost
+  port: 1883
+
+app:
+  poll_interval: 5
+  heartbeat_interval: 30
