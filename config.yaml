@@ -1,5 +1,5 @@
 mqtt:
-  host: localhost
+  host: mqtt
   port: 1883
   username: cybergrid
   password: cybergrid

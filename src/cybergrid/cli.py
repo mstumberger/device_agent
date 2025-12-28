@@ -196,6 +196,11 @@ async def main(argv: Optional[list[str]] = None) -> int:
     return await cmd_run(args)
 
 
-if __name__ == "__main__":
+def blocking_main() -> None:
+    """Synchronous wrapper for CLI entry point."""
     sys_exit = asyncio.run(main())
     raise SystemExit(sys_exit)
+
+
+if __name__ == "__main__":
+    blocking_main()

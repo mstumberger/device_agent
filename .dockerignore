@@ -1,0 +1,43 @@
+# Version control
+.git/
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Documentation (keep only README)
+*.md
+!README.md
+CLAUDE.md
+instructions.txt
+
+# Testing
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# Development
+.env
+*.local.yaml
+*.local.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

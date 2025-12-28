@@ -5,7 +5,7 @@ import json
 from abc import ABC
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Any, Dict
+from typing import Callable, Any, Dict, TypeVar
 
 import yaml
 
@@ -61,7 +61,10 @@ class ReadingsConfig(Config):
             self.faker = FakerServiceConfig()
 
 
-def _merge_dataclass(instance: Config, data: dict[str, Any]) -> dict[str, Any]:
+T = TypeVar('T', bound=Config)
+
+
+def _merge_dataclass(instance: T, data: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """Merge dict into dataclass, returning changed values."""
     changed = {}
     for key, value in data.items():
@@ -143,7 +146,7 @@ class ConfigManager(Logger):
         for cb in self._watchers:
             cb(changes)
 
-    def _reload_config(self) -> dict[str, Config]:
+    def _reload_config(self) -> dict[str, dict[str, Any]]:
         """Reload config.yaml, handling errors gracefully."""
         try:
             with open(self._config_path) as f:
@@ -173,3 +176,4 @@ class ConfigManager(Logger):
                 await self._watch_task
             except asyncio.CancelledError:
                 pass
+            self.debug("Stopped config file watcher")

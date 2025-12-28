@@ -79,7 +79,7 @@ class DeviceAgent(Logger):
                     "power": measurement.power
                 }
 
-                topic = f"device/{self.config.device.id}/measurement"
+                topic = f"device/{self.config.device.id}/state"
                 await self.mqtt_client.publish(topic, json.dumps(payload), qos=0)
 
             await asyncio.sleep(self.config.app.poll_interval)

@@ -14,10 +14,28 @@ services:
     networks:
       - cybergrid-network
     healthcheck:
-      test: ["CMD", "mosquitto_sub", "-t", "$$SYS/#", "-C", "1", "-i", "healthcheck", "-W", "3"]
+      test: ["CMD", "mosquitto_sub", "-h", "localhost", "-t", "$$SYS/#", "-C", "1", "-i", "healthcheck", "-W", "3", "-u", "cybergrid", "-P", "cybergrid"]
       interval: 30s
       timeout: 10s
       retries: 3
+
+  # CyberGrid Device Agent
+  agent:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: cybergrid-agent
+    restart: unless-stopped
+    volumes:
+      - ../config.yaml:/app/config.yaml
+      - ../device.json:/app/device.json
+    environment:
+      - LOG_LEVEL=INFO
+    networks:
+      - cybergrid-network
+    depends_on:
+      mqtt:
+        condition: service_healthy
 
 networks:
   cybergrid-network:
