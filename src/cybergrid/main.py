@@ -1,10 +1,8 @@
 import asyncio
 import json
 import logging
-import random
 import signal
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Dict, Any
 
@@ -12,6 +10,7 @@ from cybergrid.cli import parse_args, setup_logging, validate_config_file, show_
 from cybergrid.config import ConfigManager
 from cybergrid.mqtt.client import MQTTClientWrapper
 from cybergrid.helpers.logging import Logger
+from cybergrid.readings import FakeReadings
 
 
 class DeviceAgent(Logger):
@@ -23,6 +22,7 @@ class DeviceAgent(Logger):
         self.project_root = project_root
         self.config = ConfigManager(project_root)
         self.mqtt_client: Optional[MQTTClientWrapper] = None
+        self._readings = None
         self._running = False
         self._tasks: list[asyncio.Task] = []
         self._shutdown_event = asyncio.Event()
@@ -41,6 +41,9 @@ class DeviceAgent(Logger):
         # Config hot-reload
         self.config.on_change(self._on_config_changed)
         await self.config.watch_config()
+
+        # Readings generator
+        self._readings = FakeReadings(self.config)
 
         # MQTT connection with retry
         self.mqtt_client = MQTTClientWrapper(self.config)
@@ -67,22 +70,17 @@ class DeviceAgent(Logger):
 
     async def _measurement_task(self) -> None:
         """Generate and publish power measurements."""
-
-        base_power = self.config.device.power
-
         while self._running:
             if self.mqtt_client and self.mqtt_client.connected:
-                # Vary power by ±5%
-                variation = random.uniform(-0.05, 0.05)
-                simulated_power = base_power * (1 + variation)
+                measurement = await self._readings.get_reading()
 
-                measurement = {
-                    "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                    "power": round(simulated_power, 1)
+                payload = {
+                    "timestamp": measurement.timestamp,
+                    "power": measurement.power
                 }
 
                 topic = f"device/{self.config.device.id}/measurement"
-                await self.mqtt_client.publish(topic, json.dumps(measurement), qos=0)
+                await self.mqtt_client.publish(topic, json.dumps(payload), qos=0)
 
             await asyncio.sleep(self.config.app.poll_interval)
 

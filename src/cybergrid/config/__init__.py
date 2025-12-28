@@ -44,6 +44,23 @@ class AppConfig(Config):
     heartbeat_interval: int = 30
 
 
+@dataclass
+class FakerServiceConfig(Config):
+    """Faker readings service configuration from config.yaml."""
+    enabled: bool = True
+    variation: float = 0.05
+
+
+@dataclass
+class ReadingsConfig(Config):
+    """Readings services configuration from config.yaml."""
+    faker: FakerServiceConfig = None
+
+    def __post_init__(self):
+        if self.faker is None:
+            self.faker = FakerServiceConfig()
+
+
 def _merge_dataclass(instance: Config, data: dict[str, Any]) -> dict[str, Any]:
     """Merge dict into dataclass, returning changed values."""
     changed = {}
@@ -70,6 +87,7 @@ class ConfigManager(Logger):
         self.device = DeviceConfig()
         self.mqtt = MqttConfig()
         self.app = AppConfig()
+        self.readings = ReadingsConfig()
 
         self._config_path = project_root / "config.yaml"
         self._watchers: list[Callable[[Dict[str, Any]], None]] = []
@@ -136,6 +154,9 @@ class ConfigManager(Logger):
                 changes.update(_merge_dataclass(self.mqtt, data["mqtt"]))
             if "app" in data:
                 changes.update(_merge_dataclass(self.app, data["app"]))
+            if "readings" in data:
+                if "faker" in data["readings"]:
+                    changes.update(_merge_dataclass(self.readings.faker, data["readings"]["faker"]))
             return changes
         except (yaml.YAMLError, IOError):
             return {}

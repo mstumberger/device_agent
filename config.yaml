@@ -7,3 +7,8 @@ mqtt:
 app:
   poll_interval: 5
   heartbeat_interval: 30
+
+readings:
+  faker:
+    enabled: true
+    variation: 0.05
