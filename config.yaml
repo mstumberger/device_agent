@@ -1,6 +1,8 @@
 mqtt:
   host: localhost
   port: 1883
+  username: cybergrid
+  password: cybergrid
 
 app:
   poll_interval: 5

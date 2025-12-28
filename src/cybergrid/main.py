@@ -1,32 +1,26 @@
 import asyncio
 import json
 import logging
-import signal
 import random
+import signal
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Any, Dict
+from typing import Optional, Dict, Any
 
-from cybergrid.helpers.logging import Logger
-from cybergrid.mqtt.client import MQTTClientWrapper
+from cybergrid.cli import parse_args, setup_logging, validate_config_file, show_version
 from cybergrid.config import ConfigManager
-
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
+from cybergrid.mqtt.client import MQTTClientWrapper
+from cybergrid.helpers.logging import Logger
 
 
 class DeviceAgent(Logger):
     def __init__(
         self,
-        project_root: Optional[Path] = None
+        project_root: Path
     ):
         super().__init__()
-        if project_root is None:
-            project_root = Path(__file__).parent.parent.parent
-
+        self.project_root = project_root
         self.config = ConfigManager(project_root)
         self.mqtt_client: Optional[MQTTClientWrapper] = None
         self._running = False
@@ -36,7 +30,12 @@ class DeviceAgent(Logger):
     async def run(self) -> None:
         """Run the device agent."""
         self.info("Initializing CyberGrid Device Agent")
-        self.info(f"Device ID: {self.config.device.id}, Power: {self.config.device.power}W")
+        self.info(f"Device ID: {self.config.device.id}")
+        self.info(f"Power Rating: {self.config.device.power}W")
+        self.info(f"MQTT Broker: {self.config.mqtt.host}:{self.config.mqtt.port}")
+        self.info(f"Poll Interval: {self.config.app.poll_interval}s")
+        self.info(f"Heartbeat Interval: {self.config.app.heartbeat_interval}s")
+
         self._running = True
 
         # Config hot-reload
@@ -92,7 +91,7 @@ class DeviceAgent(Logger):
         if not changes:
             return
 
-        if any(k in changes for k in ('host', 'port')) and self.mqtt_client:
+        if any(k in changes for k in ('host', 'port', 'username', 'password')) and self.mqtt_client:
             self.info("MQTT settings changed, reconnecting...")
             asyncio.create_task(self._reconnect_mqtt())
 
@@ -126,10 +125,32 @@ class DeviceAgent(Logger):
         self.info("Shutdown complete")
 
 
-async def main() -> None:
+async def main(argv: Optional[list[str]] = None) -> int:
     """Entry point."""
-    agent = DeviceAgent()
+    args = parse_args(argv)
 
+    if args.version:
+        show_version()
+        return 0
+
+    # # Require 'run' command
+    if args.command != "run":
+        print("Error: No command specified. Use 'run' to start the agent.", file=sys.stderr)
+        print("Use 'cybergrid-agent --help' for usage information.", file=sys.stderr)
+        return 1
+
+    setup_logging(args.log_level, args.log_format)
+
+    # Validate configuration file exists
+    config_path = validate_config_file(args.config)
+
+    # Determine project root (config file's parent directory)
+    project_root = config_path.parent
+
+    # Create and run agent
+    agent = DeviceAgent(project_root)
+
+    # Setup signal handlers for graceful shutdown
     def signal_handler() -> None:
         agent._shutdown_event.set()
 
@@ -139,13 +160,16 @@ async def main() -> None:
 
     try:
         await agent.run()
+        return 0
     except KeyboardInterrupt:
-        agent.info("Shutdown requested...")
+        agent.info("Shutdown requested via SIGINT")
         await agent.shutdown()
+        return 0
+    except Exception as e:
+        logging.error(f"Unhandled exception: {e}", exc_info=True)
+        return 1
 
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        pass
+    sys_exit = asyncio.run(main(["run", "--log-level", "DEBUG"]))
+    raise SystemExit(sys_exit)

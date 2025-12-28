@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import logging
 from abc import ABC
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,6 +33,8 @@ class MqttConfig(Config):
     """MQTT broker connection configuration."""
     host: str = "localhost"
     port: int = 1883
+    username: str = ""
+    password: str = ""
 
 
 @dataclass

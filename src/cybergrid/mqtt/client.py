@@ -62,13 +62,15 @@ class MQTTClientWrapper(Logger):
         self._client = Client(
             hostname=mqtt.host,
             port=mqtt.port,
+            username=mqtt.username,
+            password=mqtt.password,
             identifier=device_id,
             will=will
         )
 
         await self._client.__aenter__()
         self._connected = True
-        self.info(f"Connected to MQTT broker at {mqtt.host}:{mqtt.port}")
+        self.info(f"Connected to MQTT broker at {mqtt.host}:{mqtt.port} (authenticated as {mqtt.username})")
         await self.publish_status("online")
 
     async def disconnect(self) -> None:
