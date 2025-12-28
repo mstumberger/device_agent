@@ -21,6 +21,7 @@ class MQTTClientWrapper(Logger):
         self._connected = False
         self._reconnect_requested = False
         self._running = False
+        self._lock = asyncio.Lock()
 
     async def start(self) -> None:
         """Start connection management (runs in background task)."""
@@ -75,33 +76,35 @@ class MQTTClientWrapper(Logger):
 
     async def disconnect(self) -> None:
         """Disconnect from MQTT broker."""
-        self._running = False
-        self._connected = False
+        async with self._lock:
+            self._running = False
+            self._connected = False
 
-        if self._client:
-            try:
-                await self.publish_status("offline")
-            except Exception:
-                pass
-            try:
-                await self._client.__aexit__(None, None, None)
-            except Exception:
-                pass
+            if self._client:
+                try:
+                    await self.publish_status("offline")
+                except Exception:
+                    pass
+                try:
+                    await self._client.__aexit__(None, None, None)
+                except Exception:
+                    pass
 
     async def reconnect(self) -> None:
         """Trigger reconnection (for config changes)."""
-        if self._client:
-            try:
-                await self.publish_status("offline")
-            except Exception:
-                pass
-            try:
-                await self._client.__aexit__(None, None, None)
-            except Exception:
-                pass
+        async with self._lock:
+            if self._client:
+                try:
+                    await self.publish_status("offline")
+                except Exception:
+                    pass
+                try:
+                    await self._client.__aexit__(None, None, None)
+                except Exception:
+                    pass
 
-        self._connected = False
-        self._reconnect_requested = True
+            self._connected = False
+            self._reconnect_requested = True
 
     async def publish_status(self, status: str) -> None:
         """Publish device status."""
@@ -113,8 +116,14 @@ class MQTTClientWrapper(Logger):
         if not self._connected or not self._client:
             return
 
-        self.debug(f"Publishing: {topic} | QoS={qos} | retain={retain} | payload={payload}")
-        await self._client.publish(topic, payload, qos=qos, retain=retain)
+        async with self._lock:
+            if not self._connected or not self._client:
+                return
+            try:
+                self.debug(f"Publishing: {topic} | QoS={qos} | retain={retain} | payload={payload}")
+                await self._client.publish(topic, payload, qos=qos, retain=retain)
+            except (OSError, MqttError) as e:
+                self.debug(f"Publish failed (client may be reconnecting): {e}")
 
     @property
     def connected(self) -> bool:
